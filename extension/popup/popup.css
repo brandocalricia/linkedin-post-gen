@@ -16,6 +16,69 @@ body {
   padding: 16px;
 }
 
+/* Auth Screen */
+.auth-header {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.auth-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #0a66c2;
+}
+
+.auth-subtitle {
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+
+#auth-screen input[type="email"],
+#auth-screen input[type="password"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: #fafafa;
+  transition: border-color 0.15s;
+}
+
+#auth-screen input[type="email"]:focus,
+#auth-screen input[type="password"]:focus {
+  outline: none;
+  border-color: #0a66c2;
+  background: #fff;
+}
+
+.btn-secondary {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-secondary:hover {
+  background: #f5f5f5;
+  border-color: #bbb;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Header */
 .header {
   display: flex;
   justify-content: space-between;
@@ -27,6 +90,31 @@ body {
   font-size: 16px;
   font-weight: 600;
   color: #0a66c2;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-logout:hover {
+  background: #f0f0f0;
+  color: #c62828;
 }
 
 .usage-badge {
@@ -303,7 +391,17 @@ select {
   padding-top: 10px;
   border-top: 1px solid #eee;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.user-email {
+  font-size: 11px;
+  color: #999;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plan-label {

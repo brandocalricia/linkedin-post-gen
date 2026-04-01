@@ -1,23 +1,66 @@
 import os
-from datetime import datetime
+from datetime import datetime, date
 
 import anthropic
-from fastapi import FastAPI, HTTPException
+import httpx
+import stripe
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from gotrue import SyncGoTrueClient
 
 app = FastAPI(title="LinkedIn Post Generator API")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-client = anthropic.Anthropic()
+claude = anthropic.Anthropic()
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+
+auth_client = SyncGoTrueClient(
+    url=f"{SUPABASE_URL}/auth/v1",
+    headers={"apikey": SUPABASE_SERVICE_KEY},
+)
+
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
 
 MODEL = "claude-haiku-4-5-20251001"
+FREE_DAILY_LIMIT = 3
+
+
+def db_request(method: str, table: str, params: dict | None = None, body: dict | None = None):
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    with httpx.Client() as client:
+        if method == "GET":
+            res = client.get(url, headers=headers, params=params)
+        elif method == "POST":
+            res = client.post(url, headers=headers, params=params, json=body)
+        elif method == "PATCH":
+            res = client.patch(url, headers=headers, params=params, json=body)
+        else:
+            raise ValueError(f"Unsupported method: {method}")
+    res.raise_for_status()
+    return res.json() if res.text else None
+
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str
 
 
 class GenerateRequest(BaseModel):
@@ -32,6 +75,111 @@ class GenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     text: str
     tokens_used: int
+    usage_remaining: int
+
+
+async def get_current_user(authorization: str = Header(...)):
+    token = authorization.replace("Bearer ", "")
+    try:
+        res = auth_client.get_user(token)
+        return res.user
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+
+def get_usage_today(user_id: str) -> int:
+    today = date.today().isoformat()
+    rows = db_request("GET", "usage", params={
+        "user_id": f"eq.{user_id}",
+        "date": f"eq.{today}",
+        "select": "generation_count",
+    })
+    if rows:
+        return rows[0]["generation_count"]
+    return 0
+
+
+def increment_usage(user_id: str):
+    today = date.today().isoformat()
+    rows = db_request("GET", "usage", params={
+        "user_id": f"eq.{user_id}",
+        "date": f"eq.{today}",
+        "select": "id,generation_count",
+    })
+    if rows:
+        db_request("PATCH", "usage", params={"id": f"eq.{rows[0]['id']}"}, body={
+            "generation_count": rows[0]["generation_count"] + 1,
+        })
+    else:
+        db_request("POST", "usage", body={
+            "user_id": user_id,
+            "date": today,
+            "generation_count": 1,
+        })
+
+
+def get_user_plan(user_id: str) -> str:
+    rows = db_request("GET", "users", params={
+        "id": f"eq.{user_id}",
+        "select": "plan",
+    })
+    if rows:
+        return rows[0]["plan"]
+    return "free"
+
+
+@app.post("/auth/signup")
+async def signup(req: AuthRequest):
+    try:
+        res = auth_client.sign_up({"email": req.email, "password": req.password})
+        if not res.user:
+            raise HTTPException(status_code=400, detail="Signup failed.")
+        db_request("POST", "users", body={
+            "id": res.user.id,
+            "email": req.email,
+            "plan": "free",
+        })
+        return {
+            "access_token": res.session.access_token if res.session else None,
+            "user": {"id": res.user.id, "email": req.email, "plan": "free"},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/auth/login")
+async def login(req: AuthRequest):
+    try:
+        res = auth_client.sign_in_with_password(
+            {"email": req.email, "password": req.password}
+        )
+        plan = get_user_plan(res.user.id)
+        usage = get_usage_today(res.user.id)
+        return {
+            "access_token": res.session.access_token,
+            "user": {
+                "id": res.user.id,
+                "email": res.user.email,
+                "plan": plan,
+                "usage_today": usage,
+            },
+        }
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+
+@app.get("/auth/me")
+async def me(user=Depends(get_current_user)):
+    plan = get_user_plan(user.id)
+    usage = get_usage_today(user.id)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "plan": plan,
+        "usage_today": usage,
+    }
 
 
 SYSTEM_PROMPT = """You are an expert LinkedIn content writer. You write posts that feel authentic, human, and engaging — never corporate, spammy, or cringe.
@@ -97,7 +245,13 @@ Keep it concise (2-4 sentences). Sound natural, not like an AI. Write ONLY the r
 
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate(req: GenerateRequest):
+async def generate(req: GenerateRequest, user=Depends(get_current_user)):
+    plan = get_user_plan(user.id)
+    usage = get_usage_today(user.id)
+
+    if plan != "pro" and usage >= FREE_DAILY_LIMIT:
+        raise HTTPException(status_code=429, detail="Daily free limit reached. Upgrade to Pro for unlimited.")
+
     try:
         if req.type == "post":
             if not req.topic:
@@ -110,7 +264,7 @@ async def generate(req: GenerateRequest):
         else:
             raise HTTPException(status_code=400, detail="Type must be 'post' or 'reply'.")
 
-        message = client.messages.create(
+        message = claude.messages.create(
             model=MODEL,
             max_tokens=500,
             system=SYSTEM_PROMPT,
@@ -118,11 +272,97 @@ async def generate(req: GenerateRequest):
         )
         text = message.content[0].text.strip()
         tokens_used = message.usage.input_tokens + message.usage.output_tokens
-        return GenerateResponse(text=text, tokens_used=tokens_used)
+
+        increment_usage(user.id)
+        new_usage = usage + 1
+        remaining = max(0, FREE_DAILY_LIMIT - new_usage) if plan != "pro" else -1
+
+        return GenerateResponse(text=text, tokens_used=tokens_used, usage_remaining=remaining)
+    except HTTPException:
+        raise
     except anthropic.APIError as e:
         raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/create-checkout-session")
+async def create_checkout_session(user=Depends(get_current_user)):
+    rows = db_request("GET", "users", params={
+        "id": f"eq.{user.id}",
+        "select": "stripe_customer_id",
+    })
+    customer_id = rows[0]["stripe_customer_id"] if rows and rows[0].get("stripe_customer_id") else None
+
+    if not customer_id:
+        customer = stripe.Customer.create(email=user.email, metadata={"user_id": user.id})
+        customer_id = customer.id
+        db_request("PATCH", "users", params={"id": f"eq.{user.id}"}, body={
+            "stripe_customer_id": customer_id,
+        })
+
+    session = stripe.checkout.Session.create(
+        customer=customer_id,
+        payment_method_types=["card"],
+        line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+        mode="subscription",
+        success_url=os.environ.get("STRIPE_SUCCESS_URL", "https://linkedin-post-gen.com/success"),
+        cancel_url=os.environ.get("STRIPE_CANCEL_URL", "https://linkedin-post-gen.com/cancel"),
+        metadata={"user_id": user.id},
+    )
+    return {"checkout_url": session.url}
+
+
+@app.post("/webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except (ValueError, stripe.SignatureVerificationError):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        customer_id = session.get("customer")
+        rows = db_request("GET", "users", params={
+            "stripe_customer_id": f"eq.{customer_id}",
+            "select": "id",
+        })
+        if rows:
+            db_request("PATCH", "users", params={"id": f"eq.{rows[0]['id']}"}, body={
+                "plan": "pro",
+            })
+
+    elif event["type"] in ("customer.subscription.deleted", "customer.subscription.updated"):
+        subscription = event["data"]["object"]
+        customer_id = subscription.get("customer")
+        rows = db_request("GET", "users", params={
+            "stripe_customer_id": f"eq.{customer_id}",
+            "select": "id",
+        })
+        if rows:
+            is_active = subscription.get("status") in ("active", "trialing")
+            db_request("PATCH", "users", params={"id": f"eq.{rows[0]['id']}"}, body={
+                "plan": "pro" if is_active else "free",
+            })
+
+    elif event["type"] == "invoice.payment_failed":
+        invoice = event["data"]["object"]
+        customer_id = invoice.get("customer")
+        attempt_count = invoice.get("attempt_count", 0)
+        if attempt_count >= 3:
+            rows = db_request("GET", "users", params={
+                "stripe_customer_id": f"eq.{customer_id}",
+                "select": "id",
+            })
+            if rows:
+                db_request("PATCH", "users", params={"id": f"eq.{rows[0]['id']}"}, body={
+                    "plan": "free",
+                })
+
+    return JSONResponse(content={"received": True})
 
 
 @app.get("/health")
