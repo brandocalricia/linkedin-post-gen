@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime, date
 
 import anthropic
@@ -9,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 from gotrue import SyncGoTrueClient
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="LinkedIn Post Generator API", docs_url=None, redoc_url=None)
 
@@ -337,20 +341,28 @@ async def stripe_webhook(request: Request):
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except (ValueError, stripe.SignatureVerificationError):
+    except (ValueError, stripe.SignatureVerificationError) as e:
+        logger.error(f"Webhook signature verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid webhook signature.")
+
+    logger.info(f"Webhook received: {event['type']}")
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         customer_id = session.get("customer")
+        logger.info(f"Checkout completed for customer: {customer_id}")
         rows = db_request("GET", "users", params={
             "stripe_customer_id": f"eq.{customer_id}",
             "select": "id",
         })
+        logger.info(f"User lookup result: {rows}")
         if rows:
             db_request("PATCH", "users", params={"id": f"eq.{rows[0]['id']}"}, body={
                 "plan": "pro",
             })
+            logger.info(f"Updated user {rows[0]['id']} to pro")
+        else:
+            logger.warning(f"No user found with stripe_customer_id={customer_id}")
 
     elif event["type"] in ("customer.subscription.deleted", "customer.subscription.updated"):
         subscription = event["data"]["object"]
@@ -364,6 +376,7 @@ async def stripe_webhook(request: Request):
             db_request("PATCH", "users", params={"id": f"eq.{rows[0]['id']}"}, body={
                 "plan": "pro" if is_active else "free",
             })
+            logger.info(f"Subscription update for {rows[0]['id']}: {'pro' if is_active else 'free'}")
 
     elif event["type"] == "invoice.payment_failed":
         invoice = event["data"]["object"]
