@@ -3,13 +3,13 @@
 Everything you need to do manually to get this live. All the code is already written — this guide covers the dashboard/account setup steps.
 
 **Total cost to launch:**
-- Supabase: FREE (free tier)
+- Supabase: FREE (free tier, no time limit)
 - Stripe: FREE to create (they take 2.9% + $0.30 per transaction only when you get paid)
-- Railway: FREE for 500 hours/month on the Trial plan, then ~$5/mo on Hobby
+- Railway: Free 30-day trial, then **$5/month** (Hobby plan — required to keep your backend running)
 - Chrome Web Store: **$5 one-time fee** (required to publish)
 - Landing page (Bolt + Netlify): FREE
 
-**You will only need to pay $5 upfront** (Chrome Web Store). Everything else is free until you have real users.
+**Upfront cost: $10** — $5 for Chrome Web Store (one-time) + $5 for Railway (monthly, starts after 30-day trial). Stripe and Supabase are free.
 
 ---
 
@@ -132,9 +132,9 @@ You'll come back to this step after deploying to Railway, because you need your 
 
 ---
 
-## Step 3: Deploy Backend to Railway (15 min) — FREE (Trial plan: 500 hrs/month)
+## Step 3: Deploy Backend to Railway (15 min) — Free 30-day trial, then **$5/month**
 
-Railway hosts your Python backend so it's accessible from the internet. The Trial plan gives you 500 hours/month for free — that's enough to run 24/7 for ~20 days. When you're ready to go full-time, the Hobby plan is **$5/month**.
+Railway hosts your Python backend so it's accessible from the internet. The Trial plan lasts 30 days for free. After that, you need the Hobby plan at **$5/month** to keep it running. You'll need to add a credit card when signing up, but you won't be charged until the trial ends.
 
 ### 3a. Create an Account
 1. Go to **https://railway.com** in your browser
