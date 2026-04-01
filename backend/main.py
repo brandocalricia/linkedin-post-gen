@@ -10,13 +10,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from gotrue import SyncGoTrueClient
 
-app = FastAPI(title="LinkedIn Post Generator API")
+app = FastAPI(title="LinkedIn Post Generator API", docs_url=None, redoc_url=None)
+
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "").split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 claude = anthropic.Anthropic()
@@ -35,6 +37,9 @@ STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
 
 MODEL = "claude-haiku-4-5-20251001"
 FREE_DAILY_LIMIT = 3
+MAX_TOPIC_LENGTH = 500
+MAX_POST_LENGTH = 2000
+MAX_ANGLE_LENGTH = 200
 
 
 def db_request(method: str, table: str, params: dict | None = None, body: dict | None = None):
@@ -145,8 +150,8 @@ async def signup(req: AuthRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Signup failed. Email may already be in use.")
 
 
 @app.post("/auth/login")
@@ -256,10 +261,22 @@ async def generate(req: GenerateRequest, user=Depends(get_current_user)):
         if req.type == "post":
             if not req.topic:
                 raise HTTPException(status_code=400, detail="Topic is required for post generation.")
+            if len(req.topic) > MAX_TOPIC_LENGTH:
+                raise HTTPException(status_code=400, detail=f"Topic must be under {MAX_TOPIC_LENGTH} characters.")
+            if req.tone not in TONE_GUIDES:
+                raise HTTPException(status_code=400, detail="Invalid tone.")
+            if req.length not in LENGTH_GUIDES:
+                raise HTTPException(status_code=400, detail="Invalid length.")
             user_prompt = build_post_prompt(req.topic, req.tone, req.length)
         elif req.type == "reply":
             if not req.original_post:
                 raise HTTPException(status_code=400, detail="Original post text is required for reply generation.")
+            if len(req.original_post) > MAX_POST_LENGTH:
+                raise HTTPException(status_code=400, detail=f"Post text must be under {MAX_POST_LENGTH} characters.")
+            if req.angle and len(req.angle) > MAX_ANGLE_LENGTH:
+                raise HTTPException(status_code=400, detail=f"Angle must be under {MAX_ANGLE_LENGTH} characters.")
+            if req.tone not in TONE_GUIDES:
+                raise HTTPException(status_code=400, detail="Invalid tone.")
             user_prompt = build_reply_prompt(req.original_post, req.tone, req.angle)
         else:
             raise HTTPException(status_code=400, detail="Type must be 'post' or 'reply'.")
@@ -280,10 +297,10 @@ async def generate(req: GenerateRequest, user=Depends(get_current_user)):
         return GenerateResponse(text=text, tokens_used=tokens_used, usage_remaining=remaining)
     except HTTPException:
         raise
-    except anthropic.APIError as e:
-        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except anthropic.APIError:
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable. Try again.")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Something went wrong. Try again.")
 
 
 @app.post("/create-checkout-session")

@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "description": "Generate engaging LinkedIn posts and smart replies with AI. Pick your tone, get a draft in seconds.",
   "permissions": ["activeTab", "storage"],
-  "host_permissions": ["https://www.linkedin.com/*"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://linkedin-post-gen-production-a8f4.up.railway.app/*"
+  ],
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
