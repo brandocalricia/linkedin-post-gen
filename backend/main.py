@@ -334,12 +334,37 @@ async def create_checkout_session(user=Depends(get_current_user)):
     return {"checkout_url": session.url}
 
 
+def safe_get(obj, key, default=None):
+    """Get a value from a dict or stripe object safely."""
+    try:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+    except Exception:
+        return default
+
+
 def find_user_id_from_customer(customer_id: str) -> str | None:
     rows = db_request("GET", "users", params={
         "stripe_customer_id": f"eq.{customer_id}",
         "select": "id",
     })
     return rows[0]["id"] if rows else None
+
+
+def update_user_plan(user_id: str, plan: str):
+    """Update user plan via direct httpx call for maximum reliability."""
+    url = f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    with httpx.Client() as client:
+        res = client.patch(url, headers=headers, json={"plan": plan})
+    logger.info(f"update_user_plan({user_id}, {plan}) — status={res.status_code}, body={res.text}")
+    res.raise_for_status()
 
 
 @app.post("/webhook")
@@ -353,52 +378,47 @@ async def stripe_webhook(request: Request):
         logger.error(f"Webhook signature verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid webhook signature.")
 
-    logger.info(f"Webhook received: {event['type']}")
+    event_type = event["type"] if isinstance(event, dict) else event.type
+    logger.info(f"Webhook received: {event_type}")
 
     try:
-        if event["type"] == "checkout.session.completed":
-            session = event["data"]["object"]
-            customer_id = session.get("customer")
-            metadata = session.get("metadata", {})
-            user_id = metadata.get("user_id")
+        event_data = event["data"]["object"] if isinstance(event, dict) else event.data.object
+
+        if event_type == "checkout.session.completed":
+            customer_id = safe_get(event_data, "customer")
+            metadata = safe_get(event_data, "metadata", {})
+            user_id = safe_get(metadata, "user_id") if metadata else None
             logger.info(f"Checkout completed — customer: {customer_id}, metadata user_id: {user_id}")
 
             if not user_id:
                 user_id = find_user_id_from_customer(customer_id)
 
             if user_id:
-                db_request("PATCH", "users", params={"id": f"eq.{user_id}"}, body={
-                    "plan": "pro",
-                })
+                update_user_plan(user_id, "pro")
                 logger.info(f"Updated user {user_id} to pro")
             else:
                 logger.warning(f"No user found for customer={customer_id}")
 
-        elif event["type"] in ("customer.subscription.deleted", "customer.subscription.updated"):
-            subscription = event["data"]["object"]
-            customer_id = subscription.get("customer")
+        elif event_type in ("customer.subscription.deleted", "customer.subscription.updated"):
+            customer_id = safe_get(event_data, "customer")
             user_id = find_user_id_from_customer(customer_id)
             if user_id:
-                is_active = subscription.get("status") in ("active", "trialing")
-                db_request("PATCH", "users", params={"id": f"eq.{user_id}"}, body={
-                    "plan": "pro" if is_active else "free",
-                })
+                status = safe_get(event_data, "status")
+                is_active = status in ("active", "trialing")
+                update_user_plan(user_id, "pro" if is_active else "free")
                 logger.info(f"Subscription update for {user_id}: {'pro' if is_active else 'free'}")
 
-        elif event["type"] == "invoice.payment_failed":
-            invoice = event["data"]["object"]
-            customer_id = invoice.get("customer")
-            attempt_count = invoice.get("attempt_count", 0)
+        elif event_type == "invoice.payment_failed":
+            customer_id = safe_get(event_data, "customer")
+            attempt_count = safe_get(event_data, "attempt_count", 0)
             if attempt_count >= 3:
                 user_id = find_user_id_from_customer(customer_id)
                 if user_id:
-                    db_request("PATCH", "users", params={"id": f"eq.{user_id}"}, body={
-                        "plan": "free",
-                    })
+                    update_user_plan(user_id, "free")
 
     except Exception as e:
-        logger.error(f"Webhook processing error: {e}", exc_info=True)
-        return JSONResponse(content={"received": True, "error": str(e)}, status_code=200)
+        logger.error(f"Webhook processing error: {type(e).__name__}: {e}", exc_info=True)
+        return JSONResponse(content={"received": True, "error": f"{type(e).__name__}: {e}"}, status_code=200)
 
     return JSONResponse(content={"received": True})
 
