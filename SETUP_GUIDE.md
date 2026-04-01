@@ -3,13 +3,14 @@
 Everything you need to do manually to get this live. All the code is already written — this guide covers the dashboard/account setup steps.
 
 **Total cost to launch:**
+- Anthropic API: **$5 minimum credit purchase** (required to get an API key — pays for AI generations, lasts a long time with Haiku)
 - Supabase: FREE (free tier, no time limit)
 - Stripe: FREE to create (they take 2.9% + $0.30 per transaction only when you get paid)
 - Railway: Free 30-day trial, then **$5/month** (Hobby plan — required to keep your backend running)
 - Chrome Web Store: **$5 one-time fee** (required to publish)
 - Landing page (Bolt + Netlify): FREE
 
-**Upfront cost: $10** — $5 for Chrome Web Store (one-time) + $5 for Railway (monthly, starts after 30-day trial). Stripe and Supabase are free.
+**Upfront cost: $15** — $5 Anthropic API credits + $5 Chrome Web Store (one-time) + $5 Railway (monthly, starts after 30-day trial). Stripe and Supabase are free.
 
 ---
 
