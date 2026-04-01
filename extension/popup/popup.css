@@ -404,6 +404,18 @@ select {
   white-space: nowrap;
 }
 
+.footer-upgrade {
+  font-size: 11px;
+  color: #0a66c2;
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.footer-upgrade:hover {
+  text-decoration: underline;
+}
+
 .plan-label {
   font-size: 11px;
   color: #999;

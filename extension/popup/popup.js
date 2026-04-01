@@ -181,6 +181,10 @@ function setupButtons() {
   document.getElementById("copy-btn").addEventListener("click", copyToClipboard);
   document.getElementById("regen-btn").addEventListener("click", regenerate);
   document.getElementById("upgrade-btn")?.addEventListener("click", openUpgrade);
+  document.getElementById("footer-upgrade").addEventListener("click", (e) => {
+    e.preventDefault();
+    openUpgrade();
+  });
 }
 
 async function generatePost() {
@@ -295,12 +299,15 @@ function canGenerate() {
 function updateUI() {
   const badge = document.getElementById("usage-badge");
   const planLabel = document.getElementById("plan-label");
+  const footerUpgrade = document.getElementById("footer-upgrade");
   if (isPro) {
     badge.textContent = "Pro";
     badge.className = "usage-badge";
     planLabel.textContent = "Pro plan";
     planLabel.className = "plan-label pro";
+    footerUpgrade.classList.add("hidden");
   } else {
+    footerUpgrade.classList.remove("hidden");
     const remaining = FREE_DAILY_LIMIT - usageToday;
     badge.textContent = `${remaining}/${FREE_DAILY_LIMIT} left`;
     if (remaining <= 0) {
