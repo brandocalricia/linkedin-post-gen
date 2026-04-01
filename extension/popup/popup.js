@@ -1,6 +1,4 @@
-// IMPORTANT: Update this to your production URL before publishing to Chrome Web Store
-// e.g. "https://linkedin-post-gen-production.up.railway.app"
-const API_BASE = "http://localhost:8000";
+const API_BASE = "https://linkedin-post-gen-production-a8f4.up.railway.app";
 const FREE_DAILY_LIMIT = 3;
 
 let currentMode = "post";
