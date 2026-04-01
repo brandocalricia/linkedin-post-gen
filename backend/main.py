@@ -6,7 +6,7 @@ import httpx
 import stripe
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 from gotrue import SyncGoTrueClient
 
@@ -380,6 +380,45 @@ async def stripe_webhook(request: Request):
                 })
 
     return JSONResponse(content={"received": True})
+
+
+CONFIRM_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Email Confirmed</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+display:flex;align-items:center;justify-content:center;min-height:100vh;
+background:#f5f5f5;color:#1a1a1a}
+.card{text-align:center;background:#fff;padding:48px 40px;border-radius:12px;
+box-shadow:0 2px 12px rgba(0,0,0,0.08);max-width:420px}
+.check{width:56px;height:56px;background:#e8f5e9;border-radius:50%;
+display:inline-flex;align-items:center;justify-content:center;margin-bottom:20px}
+.check svg{width:28px;height:28px;color:#2e7d32}
+h1{font-size:22px;font-weight:600;margin-bottom:8px}
+p{font-size:14px;color:#666;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="check">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+<polyline points="20 6 9 17 4 12"></polyline>
+</svg>
+</div>
+<h1>Email confirmed!</h1>
+<p>You can close this tab and go back to the extension to log in.</p>
+</div>
+</body>
+</html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return CONFIRM_HTML
 
 
 @app.get("/health")
